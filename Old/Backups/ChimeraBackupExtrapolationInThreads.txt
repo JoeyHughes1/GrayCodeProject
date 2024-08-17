@@ -1,0 +1,798 @@
+/**
+ * @file GreyCodeChimera.c
+ * @author Joey Hughes
+ * This is the super optimized method for finding the number of grey codes for n >= 4. It combines main.c, SeedSearch2, and a new 
+ * algorithm to extrapolate the seeds, so I've called it chimera, a three headed program to find the number of codes.
+*/
+
+#include <stdlib.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+#include <pthread.h>
+#ifndef GREY_CODE_TYPES_DEFINED
+    #include "GreyCodeTypes.h"
+#endif
+#include "GMPHashTable.c"
+#include "SequenceHashTable.c"
+
+
+/* The value of a stepMask that changes the highest order bit. */
+#define LAST_DIGIT_STEP (1 << (NUM_DIGITS - 1))
+
+/** The thread count is how many threads are made. */
+#define THREAD_COUNT_CODE_SEARCH 5
+
+/** How many threads to split the large extrapolation into. */
+#define THREAD_COUNT_EXTRAPOLATION 4
+
+/** This macro does the log base 2 of the given number. Used to go from the step representation to the digit number representation. */
+#define log2(x) (__builtin_ctz(x))
+
+
+
+/** The struct returned by each of the threads. Also used to pass in the unique stepMask value for each thread. */
+typedef struct {
+    /** Passing in, how many steps are set. When returned, then number of codes that were found. */
+    unsigned long long count;
+    /** Only used for passing in. Passes in the steps that are preset and once the last one of these is changed the thread is done. */
+    stepMask setSteps[len];
+    /** Pointer to the array that holds all the sequence pointers. This is allocated in each thread and accessed by the main thread. */
+    seqPtrArray seeds;
+    /** Pointer to the function that will be used to check if a sequence is a child of seed from a lower thread. */
+    bool (*checkSteps)(stepMask *);
+    /** How many steps ahead the checkSteps function looks. So that the thread knows how late in the sequence it can call. */
+    int stepsBack;
+    /** Used to pass in a pointer to the queue so it only has to be made once. */
+    step (*queueStepPointer)[2];
+} CodeSearchThreadStruct;
+
+typedef struct {
+    /** For passing in the list of seeds to extrapolate for. */
+    seqPtrArray seeds;
+    /** For passing in how many seeds to extrapolate, or how far to go in the array. */
+    unsigned long long numSeedsToExtrapolate;
+    /** Returns the amount of grey codes extrapolated. */
+    unsigned long long numGreyCodes;
+    /** Used to pass in a pointer to the queue so it only has to be made once. */
+    step (*queueStepPointer)[2];
+    /** Used to pass in a pointer to the multiples lookup table so it only has to be made once. */
+    mpz_t *multiplesTablePointer;
+} ExtrapolateThreadStruct;
+
+
+
+/** This global variable is generated and written to in main and used by each of the threads so they don't have to all compute it again. */
+stepMask lowest[len];
+
+/** n! */
+unsigned long long queueSize;
+
+
+
+/**
+ * (Extrapolating) Calculates the sequence number for the given sequence. Will set rtn to 0 first.
+ * @param sequence The sequence to get the number for.
+ * @param rtn The GMP integer where the sequence number will be stored.
+ * @return The sequence number of the given sequence.
+*/
+void getSequenceNumber(step *sequence, sequenceNum rtn)
+{
+    mpz_set_ui(rtn, 0);
+    int limit = len;
+    while(limit) {
+        mpz_mul_ui(rtn, rtn, NUM_DIGITS);
+        mpz_add_ui(rtn, rtn, *(sequence++));
+        limit--;
+    }
+}
+
+
+
+/**
+ * (Seed Searching, Extrapolating) Performs a swap in a sequence. Goes through the sequence and whenever it sees a, it writes b and when it sees b it writes a.
+ * @param seq The sequence array.
+ * @param a The first step digit number to swap.
+ * @param b The other step digit number to swap.
+ * @param limit How many steps to look at. For normal sequences is len.
+*/
+void swap(step *seq, step a, step b, int limit)
+{
+    while(limit) {
+        if(*seq == a) *seq = b;
+        else if(*seq == b) *seq = a;
+        seq++;
+        limit--;
+    }
+}
+
+
+
+/**
+ * (Seed Searching) This is a recursive function that will add the necessary swaps to the queue to go through all the possible permutations.
+ * This function returns how many total swaps were added to the queue.
+ * @param n How many digits to be swapping. 2 is the base case of just one swap, 3 is swapping to get all permutations of 3 digits, etc.
+ * @param queueIndexToAddFrom The index in the queue where new swaps should be added.
+ * @param queue Reference to the queue array.
+ * @param indicesToSwap Essentially the parameters of this function. Which digit numbers to swap. Length of this should equal n.
+ * @return The total amount of swaps added to the queue during the calling of this function.
+*/
+int addQueueSwaps(int n, int queueIndexToAddFrom, step queue[][2], int indicesToSwap[])
+{   
+    // Base case of n == 2, just one swap
+    if(n == 2) {
+        queue[queueIndexToAddFrom][0] = indicesToSwap[0];
+        queue[queueIndexToAddFrom][1] = indicesToSwap[1];
+        return 1;
+    }
+
+    // Otherwise, we are n >= 3, so we do recursion
+    // Initialize the index to add from to be the one we know is safe
+    int currentIndexToAddFrom = queueIndexToAddFrom;
+
+    // Initialize the new parameters to be all the ones we were given but leaving out the last one.
+    int recursiveIndices[n - 1];
+    for(int i = 0; i < n - 1; i++) {
+        recursiveIndices[i] = indicesToSwap[i];
+    }
+
+    // Recurse through all the values in the indices to swap, 
+    //    each of them getting a turn being left out of the recursive call, starting with the last one.
+    for(int i = n - 1; i > 0; i--) {
+
+        // Do the recursive call, getting all the swaps for one layer down
+        currentIndexToAddFrom += addQueueSwaps(n - 1, currentIndexToAddFrom, queue, recursiveIndices);
+
+        // Otherwise, we add a swap from i to i-1
+        queue[currentIndexToAddFrom][0] = indicesToSwap[i];
+        queue[currentIndexToAddFrom][1] = indicesToSwap[i - 1];
+        currentIndexToAddFrom++;
+
+        // Then, switch i and i-1 in the recursive indices so now i is being included again in the swaps the next loop.
+        recursiveIndices[i - 1] = indicesToSwap[i];
+    }
+
+    // Do one last adding of swaps for when i = 0
+    currentIndexToAddFrom += addQueueSwaps(n - 1, currentIndexToAddFrom, queue, recursiveIndices);
+
+    // Now we have added all the swaps we were going to, go ahead and return how many we added
+    return (currentIndexToAddFrom - queueIndexToAddFrom);
+}
+
+
+
+/**
+ * (Seed Searching) This function searches through the list of sequences using binary search and marks the one 
+ * with sequenceNum matching the given one for removal.
+ * @param seqs The list of pointers to sequences.
+ * @param size The current size of the list of sequences.
+ * @param seqToMark The sequence to mark.
+*/
+bool markForRemoval(sequence *seqs[], int size, sequence seqToMark)
+{
+    int low = 0;
+    step *inToMark;
+    step *inSeqs;
+    // I'm saving declaring another variable and just treating size as our high index.
+    while(low <= size) {
+        int mid = low + ((size - low) >> 1);
+
+        // Get the number at the middle and compare
+        inToMark = seqToMark + 2;
+        inSeqs = (step *)(*(seqs[mid])) + 2;
+        while(*inToMark == *inSeqs) {
+            inToMark++;
+            if(inToMark - seqToMark >= len) {
+                (*(seqs[mid]))[0] = 1; // Setting the first step to 1 is our mark for removal.
+                return true;
+            }
+            inSeqs++;
+        }
+
+        // If our num is greater, ignore left half, set low up
+        if(*inToMark > *inSeqs)
+            low = mid + 1;
+
+        // If our num is smaller, ignore right half, set high (size) down
+        else
+            size = mid - 1;
+    }
+
+    // If we reach here, then element was not present
+    //printf("Nope.\n");
+    return false;
+}
+
+
+
+/**
+ * Part of the family of functions for each thread that returns true if the set of steps
+ * indicates that the sequence is a child of a seed from a lower thread.
+ * This one returns true if the first, third, and fifth step are the same, cause then
+ * it could be swapped into 01020.
+ * Looks back 4 steps.
+ * @param stepPtr The pointer to the steps to check.
+ * @return True if the sequence should be skipped, false if not.
+*/
+bool checkSteps01021(stepMask *stepPtr)
+{
+    return (stepPtr[-4] == stepPtr[-2] && stepPtr[-2] == stepPtr[0]);
+}
+
+
+
+/**
+ * Part of the family of functions for each thread that returns true if the set of steps
+ * indicates that the sequence is a child of a seed from a lower thread.
+ * This one returns true if either the first, third, and fifth step are all the same,
+ * in which case it could be swapped to 01020, or if the first and third are the same, and
+ * the second and fifth are the same too, cause then it could be swapped into 01021.
+ * Looks back 4 steps.
+ * @param stepPtr The pointer to the steps to check.
+ * @return True if the sequence should be skipped, false if not.
+*/
+bool checkSteps01023(stepMask *stepPtr)
+{
+    return (stepPtr[-4] == stepPtr[-2]) && (stepPtr[0] == stepPtr[-4] || stepPtr[0] == stepPtr[-3]);
+}
+
+
+
+/**
+ * Part of the family of functions for each thread that returns true if the set of steps
+ * indicates that the sequence is a child of a seed from a lower thread.
+ * This one checks if the first and third are the same, cause if so then it definitely
+ * appears in the 010 threads.
+ * Looks back 2 steps.
+ * @param stepPtr The pointer to the steps to check.
+ * @return True if the sequence should be skipped, false if not.
+*/
+bool checkSteps0120(stepMask *stepPtr)
+{
+    return (stepPtr[-2] == stepPtr[0]);
+}
+
+
+
+/**
+ * Part of the family of functions for each thread that returns true if the set of steps
+ * indicates that the sequence is a child of a seed from a lower thread.
+ * This one checks if the first and third are the same, cause if so then it definitely
+ * appears in the 010 threads, but also if the first and fourth are the same, cause if
+ * so then it could appear in the 0120 thread.
+ * Looks back 3 steps.
+ * @param stepPtr The pointer to the steps to check.
+ * @return True if the sequence should be skipped, false if not.
+*/
+bool checkSteps0123(stepMask *stepPtr)
+{
+    return (stepPtr[-3] == stepPtr[-1]) || (stepPtr[-3] == stepPtr[0]);
+}
+
+
+
+
+
+
+
+/**
+ * (Code Search) This function calculates the count of how many grey codes begin with a given start step number. This is used
+ * as the function ran by several threads. The parameter is a void pointer that initially points to the step number 
+ * to start at, but at the end is used to return the final count for this digit.
+ * @param threadVal The pointer to the CodeSearchThreadStruct for this thread. The count variable should hold the specific stepMask for this thread.
+ * @return Nothing, but a void * return type is necessary to make the thread. 
+*/
+void *calculateCodesWithSetStart(void *threadVal)
+{
+    // Variables
+    CodeSearchThreadStruct *threadStruct = ((CodeSearchThreadStruct *)threadVal); // Recasting to a different kind of pointer for convenience.
+    stepMask test[len + threadStruct->stepsBack];                           // The step array. This holds steps, which are unsigned characters, that represent which binary digit is being switched during that step.
+    stepMask *sptr               = test;                                    // Pointer to a step within the test array. Used for looping through
+    stepMask * const testEnd     = test + len + threadStruct->stepsBack;    // Pointer to just after the test array
+    int bffr[len+1];                                                        // This is the buffer that holds the values generated by actually performing the grey code sequence for testing it.
+    int * const buf              = bffr + 1;                                // Pointer to the "start" of the grey code. Since the first 0 never changes, but is used when calculating values, we start the pointer one val in.
+    int *bptr                    = buf;                                     // Pointer to within the buffer. Used for looping through.
+    int * const bufEndPtr        = buf + len - 1;                           // Points to the ending 0 in valid grey codes.
+    bool flags[len]              = {};                                      // This keeps track of if a number (the number of the index) has been reached in the sequence yet or not
+    stepMask * const limitStep   = test + threadStruct->count - 1;          // This is which step is being limited, as in when it changes then this thread is done and returns its count.
+    step *copyingSeq;                                                       // Pointer to the start of an allocated that is being copied into.
+    step *arraySeqPtr;                                                      // Pointer to inside an allocated sequence. Used to copy in the log2s of test.
+    stepMask *testCopyPtr;                                                  // Pointer to inside test that is used to copy the log2s of the stepMasks into the allocated sequence.
+    bool specialChecks           = threadStruct->checkSteps != NULL;        // boolean for if the special checks should be done or not.
+    step sequenceCopy[len * 2];                                             // Array to hold the sequence twice to do rotations.
+    step *zeroPtr;                                                          // Pointer in the test for seeds that finds relevant rotations (Starting with 0)
+    SeqHashTable *notSeeds       = createSeqTable(NUM_DIGITS + 10);         // The Sequence Hash Table that all the seeds and children of seeds will be added to.
+    
+
+    // Allocate the array that the seeds will be held in
+    int seedListCapacity = 256;            // The total capacity of the array. If this is reached, the array is reallocated.
+    int seedListSize = 0;                  // The size of the array, as in the actual number of elements held, and the number of sequences found.
+    // Create a stack variable, then copy that pointer value to inside the struct, but use the stack pointer for everything here.
+    threadStruct->seeds = (sequence **)malloc(sizeof(sequence *) * seedListCapacity);
+
+    // Copy the queue into a stack variable
+    step queue[queueSize][2];              // The queue of swaps to do to find all the children of a seed.
+    step (*qPtr)[2];                       // Pointer to inside the queue.
+    memcpy(queue, threadStruct->queueStepPointer, sizeof(step) * 2 * queueSize);
+
+    // The first value of the buffer is an unchanging 0
+    bffr[0] = 0;
+
+    // Initialize the test to the set steps, then the lowest array after that.
+    stepMask limitStepValue = threadStruct->setSteps[threadStruct->count - 1];
+    for(int i = 0; i < threadStruct->count; i++) 
+        test[i] = threadStruct->setSteps[i];
+    memcpy(test + threadStruct->count, lowest, (len - threadStruct->count) * sizeof(stepMask));
+
+    // Create a step (not stepMask) array of the set start of this thread
+    step setStart[threadStruct->count];
+    for(int i = 0; i < threadStruct->count; i++) {
+        setStart[i] = log2(threadStruct->setSteps[i]);
+    }
+    
+    // Loop until the limit step is changed from the starting value. Then we know we have all the codes with that set step.
+    while(*limitStep == limitStepValue) {
+
+        // -- Checking if it is a valid grey code sequence.
+        // For every changed value in the steps, until reaching a 0.
+        while(true) {
+            
+            // Do the special thread-specific check.
+            if(specialChecks && sptr - test > (threadStruct->stepsBack) && (threadStruct->checkSteps(sptr))) goto increment;
+
+            // Calculate the next number in the sequence.
+            *bptr = *(bptr - 1) ^ (*sptr);
+
+            // If it has reached 0, before the end: invalid, at the end: valid.
+            if(!*bptr) {
+                if(bptr < bufEndPtr) goto increment; else break; // If before the end, invalid, otherwise, valid.
+            }
+
+            // Check if this number has already been reached.
+            if(flags[*bptr]) goto increment;
+
+            // If it has passed all that, it's valid, mark the number as reached.
+            flags[*bptr] = true;
+
+            // Go to the next step
+            sptr++;
+            bptr++;
+        }
+
+        // 0 has been reached, there were no duplicates and it's the right length, so we have reached a valid grey code.
+        // If we are a special thread, do an extra check. There could sneak in a sequence that has a 010 on rotation, this prevents that.
+        if(specialChecks) {
+            memcpy(test + len, test, sizeof(stepMask) * (threadStruct->stepsBack));
+            testCopyPtr = sptr;
+            while(testCopyPtr < testEnd) {
+                if(threadStruct->checkSteps(testCopyPtr++))
+                    goto skipAdding;
+            }
+        }
+
+        // We have a relevant sequence. do the log2 of all its masks into the sequenceCopy
+        testCopyPtr = test;
+        copyingSeq = sequenceCopy;
+        for(arraySeqPtr = copyingSeq; arraySeqPtr - copyingSeq < len; arraySeqPtr++, testCopyPtr++)
+            *arraySeqPtr = log2(*testCopyPtr);
+        
+        // Check if it is a child. If so, skip adding it as it is not a seed.
+        if(seqHashContains(notSeeds, sequenceCopy)) goto skipAdding;
+
+        // If here, then it is officially a new seed.
+        // Make sure the array has room, resize if necessary
+        if(seedListSize == seedListCapacity) {
+            seedListCapacity *= 2;
+            threadStruct->seeds = (seqPtrArray)realloc(threadStruct->seeds, sizeof(sequence *) * seedListCapacity);
+        }
+
+        // Now allocate for the seed and copy it over
+        threadStruct->seeds[seedListSize] = (sequence *)malloc(sizeof(sequence));
+        memcpy(*(threadStruct->seeds[seedListSize]), sequenceCopy, sizeof(sequence));
+        
+        // A new seed has been added to the array, increase the size.
+        seedListSize++;
+
+        // Begin adding all of the relevant children of the seed to the sequence Hash Table
+        memcpy(sequenceCopy + len, sequenceCopy, sizeof(sequence)); // Copy the seed again into the second half
+        qPtr = queue;
+        while(qPtr - queue < queueSize) {
+
+            // Do the next swap on the localSequence
+            swap(sequenceCopy, *(*qPtr), (*qPtr)[1], len * 2);
+            qPtr++;
+
+            // Now try to find a relevant child (relevant means it is in our set)
+            zeroPtr = sequenceCopy;
+            while(zeroPtr - sequenceCopy < len) {
+
+                // Loop until the zeroPtr hits a 0
+                if(*zeroPtr != 0) {
+                    zeroPtr++;
+                    continue;
+                }
+
+                // Check if the start of the rotation matches the set start of this thread
+                if(memcmp(zeroPtr, setStart, sizeof(step) * threadStruct->count) != 0) {
+                    zeroPtr += 2;
+                    continue;
+                }
+                
+                // If we are here, then this has a matching start, we found a relevant child!
+                // Try to add it to the hash. If it was already in there, that means this is
+                //    not a unique permutation, so we can skip to the next swapping.
+                if(!seqHashInsertIfNotContains(notSeeds, zeroPtr)) goto skipToNextSwap;
+                // Otherwise, we added it, we continue looking for other children.
+                zeroPtr += threadStruct->count + 1;
+            }
+            skipToNextSwap:
+            continue;
+        }
+
+        // Now to increment. The last three steps in a cyclical grey code are forced, so we will start incrementing three steps back
+        //    That means that we can just step the pointers back three steps and let the below incrementing take over
+        //    I've seen that 6 steps can definitely miss some, but 5 doesn't immediately miss some. I haven't 
+        //    convinced myself that there is only one set of the last 5 steps that will ever finish a grey code, tho,
+        //    so I'll stick to 3. I've convinced myself of that much.
+        //    Also, the 0 flag is never actually set to true, so it doesn't need to be reset.
+        skipAdding:
+        sptr -= 3;   
+        flags[*(--bptr)] = false;
+        flags[*(--bptr)] = false;
+        flags[*(--bptr)] = false;
+
+
+        increment:
+        // -- We have encountered an invalid sequence, or are incrementing from a valid one.
+        // Increment from the step that needs to be changed.
+        while((*sptr) & LAST_DIGIT_STEP) {
+            sptr--;
+            flags[*(--bptr)] = false;
+        }
+        (*sptr) <<= 1;
+
+        // If we have incremented it to the same as the previous, increment it again.
+        if(*sptr == *(sptr - 1)) goto increment;
+
+        // Copy from lowest to the rest of the steps after the last incremented one.
+        memcpy(sptr + 1, lowest, (len - 1 - (sptr - test)) * sizeof(stepMask));
+    }
+
+    // Print the final statistics
+    printf(" ---- Seeds found was %d / %lld with %d digits with %lld set steps, last one being: %d\n\n", seedListSize, notSeeds->count, NUM_DIGITS, threadStruct->count, log2(limitStepValue));
+
+    // Return the number of seeds found.
+    threadStruct->count = seedListSize;
+
+    // Free the hash table
+    freeSeqTable(notSeeds);
+
+    // Exit the thread
+    pthread_exit(NULL);
+    return NULL;
+}
+
+
+
+/**
+ * This is a thread function for extrapolating seeds. Takes in a pointer to a ExtrapolateThreadStruct which has the list
+ * of seeds to extrapolate from and how many to extrapolate, and passes out through it the final tally.
+ * @param threadVal The ExtrapolateThreadStruct.
+ * @return Nothing, but a void * return type is necessary to make the thread.
+*/
+void *extrapolateSeeds(void *threadVal)
+{
+
+    // Variables
+    ExtrapolateThreadStruct *threadStruct = ((ExtrapolateThreadStruct *)threadVal); // Recasting for convenience
+    sequence localSequence;                                                  // A place on the stack to hold a sequence
+    step *stepPtr;                                                           // Pointer to inside the localSequence
+    GMPHashTable *uniquePermutations = createGMPTable((queueSize * 2) + 1);  // The hash table of unique permutations for the seed, size (3 * n!) + 1.
+    sequenceNum originalRotation;                                            // The original sequence number after swapping before doing rotations.
+    sequenceNum currentRotation;                                             // The variable to do the rotation calculations
+    sequence **seedPtr;                                                      // Pointer to inside the seeds list.
+    step (*qPtr)[2];                                                         // Pointer to inside the queue
+    unsigned long long numGreyCodes  = 0;                                    // The final tally of how many grey codes there are.
+    bool rotationallySymmetric;                                              // Whether or not the seed is rotationally symmetric (half as many rotations per permutation)
+    const int numHalves              = __builtin_ctz(queueSize) + 1;         // The number of times n! can be evenly halved plus one.
+    int halves[numHalves];                                                   // The list of the halves of n!, the number of possible unique permutations.
+    int *currentNextHalf;                                                    // Pointer to the next half to be reached in the halves list.
+
+    // Initialize the sequenceNums
+    mpz_init(currentRotation);
+    mpz_init(originalRotation);
+
+    // Initialize the halves list
+    //    This list will have all of the clean halves of itself plus itself normally at the end.
+    //    For example, if the queueSize was 24, then the array would have (3, 6, 12, 24)
+    for(int i = 0; i < numHalves; i++) {
+        halves[i] = (queueSize >> (numHalves - 1 - i));
+    }
+
+    // For each seed
+    seedPtr = threadStruct->seeds;
+    while(seedPtr - threadStruct->seeds < threadStruct->numSeedsToExtrapolate) {
+
+        // openPtr is pointing to the seed to analyze, copy it into localSequence
+        memcpy(localSequence, *(*(seedPtr++)), sizeof(sequence));
+
+        // Check for rotational symmetry
+        rotationallySymmetric = memcmp(localSequence, localSequence + (len/2), sizeof(step) * len/2) == 0;
+
+        // Clear the hashTable
+        emptyGMPTable(uniquePermutations);
+
+        // Reset the half tracker
+        currentNextHalf = halves;
+        // printf("With the sequence: ");
+        // for(int j = 0; j < len; j++) printf(j != len - 1 ? "%d," : "%d\n", localSequence[j]);
+
+        // Enter the loop of swaps
+        qPtr = threadStruct->queueStepPointer;
+        while(qPtr - threadStruct->queueStepPointer < queueSize) {
+
+            // Do the next swap on the localSequence
+            swap(localSequence, *(*qPtr), (*qPtr)[1], len);
+            qPtr++;
+
+            // Calculate it's number in originalRotation, copy to currentRotation
+            getSequenceNumber(localSequence, originalRotation);
+            mpz_set(currentRotation, originalRotation);
+
+            // Do rotations until the number matches one of the previous permutations or until we have exhausted all the rotations
+            stepPtr = localSequence;
+            do {
+                // Check if this rotation is equal to any of the unique permutations
+                //    If we find one that is equal, then this permutation is not unique
+                if(GMPHashContains(uniquePermutations, currentRotation)) goto notUniquePermutation;
+
+                // Otherwise, rotate the sequence
+                mpz_mul_ui(currentRotation, currentRotation, NUM_DIGITS);
+                mpz_sub(currentRotation, currentRotation, threadStruct->multiplesTablePointer[*(stepPtr++)]);
+            } while(mpz_cmp(currentRotation, originalRotation) != 0);
+
+            // If none of this swap's rotations matched the previous permutations, then it is a unique permutation,
+            //    add it officially to the list.
+            GMPHashInsert(uniquePermutations, originalRotation);
+
+            // If it matched one of the rotations, then this swap is the same as a previous, we do not need to add it.
+            notUniquePermutation:
+            if(uniquePermutations->count < *currentNextHalf) continue;
+            // If we have reached a half milestone or gone past.
+            // If blown past the half, we don't need to check anymore, increase.
+            if(uniquePermutations->count > *currentNextHalf) {
+                currentNextHalf++;
+
+                // If we are past half of the possible unique permutations, we know we will get all of them.
+                if(*currentNextHalf == queueSize) {
+                    uniquePermutations->count = queueSize;
+                    break;
+                }
+            } else 
+                // If we are on that half value, to get to the next we need to double, but if
+                //    the number of permutations left to check is less than that, we can't reach the next,
+                //    so we know they must all be not unique, we can skip them all.
+                if(*currentNextHalf > queueSize - (qPtr - threadStruct->queueStepPointer))
+                    break;
+                
+        }
+
+        // Now we should have added all the rotations from the unique permutations to the total count, we go onto the next seed.
+        numGreyCodes += uniquePermutations->count * (rotationallySymmetric ? len/2 : len);
+    }
+
+    // Print the results
+    printf(" ---------- The number of codes extrapolated from this thread was %lld.\n", numGreyCodes);
+
+    // Free stuff that needs to be free
+    freeGMPTable(uniquePermutations);
+    mpz_clear(originalRotation);
+    mpz_clear(currentRotation);
+
+    // Output the number of grey codes
+    threadStruct->numGreyCodes = numGreyCodes;
+
+    // Exit
+    pthread_exit(NULL);
+    return NULL;
+}
+
+
+
+/**
+ * Starts the program.
+ * @return Exit status.
+*/
+int main() 
+{
+    // ----- STAGE 1: INITIALIZATION
+    // Print opening empty line
+    printf("\n");
+
+    #ifdef RUNTIME
+    // Get starting benchmark time
+    clock_t start_time = clock();
+    #endif
+
+
+    // First, calculate the "lowest" grey code, the 01020103...
+    lowest[0] = 1;
+    stepMask *init = lowest + 1;
+    for(int i = 0; i < NUM_DIGITS; i++) {
+
+        // Copy the previous block over
+        memcpy(init, lowest, (init - lowest) * sizeof(stepMask));
+
+        // Move forward almost to the end
+        init += init - lowest - 1;
+
+        // Increment the last number and move to the end
+        *init <<= 1;
+        init++;
+    }
+    lowest[len - 1] >>= 1; // The last number will be over, so decrement it to get the the "first" grey code.
+
+
+    // Create the queue of swaps (to get through all swap permutations of each seed), n! swaps long (The first being a non-swap).
+    queueSize = 1;
+    for(int i = NUM_DIGITS; i > 1; i--) 
+        queueSize *= i;
+    step queue[queueSize][2];
+    queue[0][0] = 99;
+    queue[0][1] = 99;
+    int indicesToSwap[NUM_DIGITS];
+    for(int i = 0; i < NUM_DIGITS; i++) 
+        indicesToSwap[i] = i;
+    addQueueSwaps(NUM_DIGITS, 1, queue, indicesToSwap);
+
+
+    // Create the quick rotation lookup table
+    /*  I got to a nice formula for calculating rotations. Where N is the sequence number and n is the number of digits, and
+        f is the first step in the sequence, the next rotation (moving the first step to the end) can be calculated by doing:
+        N*n - f( n^(2^n) - 1 ). Everything in the parentheses is based on constants, so we can calculate that and all the possible
+        multiples of that with f in a table, then just do a multiplication and subtract a value from the table based on f.
+    */
+    mpz_t multiplesTable[NUM_DIGITS];
+    mpz_init(multiplesTable[0]);
+    mpz_init_set_ui(multiplesTable[1], 1);
+    // We perform the exponentiation by n here (len is 2^n)
+    for(int i = 0; i < len; i++) {
+        mpz_mul_ui(multiplesTable[1], multiplesTable[1], NUM_DIGITS);
+    }
+    mpz_sub_ui(multiplesTable[1], multiplesTable[1], 1); // Subtracting one we now we have n^(2^n) - 1 in index 1
+    // We fill in the rest of the table by multiplying with index 1.
+    for(int i = 2; i < NUM_DIGITS; i++) {
+        mpz_init(multiplesTable[i]);
+        mpz_mul_ui(multiplesTable[i], multiplesTable[1], i);
+    }
+
+
+
+    // ----- STAGE 2: CODE AND SEED SEARCHING
+    /* This stage involves using the main.c algorithm to find all of the grey codes starting with either
+    01020, 01021, or 01023 using three different threads. The threads are created and passed in a struct with their initial
+    step values, then the thread exits after filling the struct with how many codes it found, and an allocated array of
+    pointers to allocated sequnces (which are arrays of steps)
+    */
+
+    // Array of the thread ids
+    pthread_t threadIds[THREAD_COUNT_CODE_SEARCH];
+
+    // Array of all the initial steps
+    CodeSearchThreadStruct threadVals[THREAD_COUNT_CODE_SEARCH];
+
+    // Create all the initial step values that will be used
+    threadVals[0] = (CodeSearchThreadStruct){5, {1,2,1,4,1}, NULL, NULL, 0, queue};
+    threadVals[1] = (CodeSearchThreadStruct){5, {1,2,1,4,2}, NULL, checkSteps01021, 4, queue};
+    threadVals[2] = (CodeSearchThreadStruct){5, {1,2,1,4,8}, NULL, checkSteps01023, 4, queue};
+    threadVals[3] = (CodeSearchThreadStruct){4, {1,2,4,1}, NULL, checkSteps0120, 2, queue};
+    threadVals[4] = (CodeSearchThreadStruct){4, {1,2,4,8}, NULL, checkSteps0123, 3, queue};
+
+    // Generate the threads and pass in the value.
+    for(int i = 0; i < THREAD_COUNT_CODE_SEARCH; i++) {
+        pthread_create(threadIds + i, NULL, &calculateCodesWithSetStart, (void *)(threadVals + i));
+    }
+
+    // Wait for all the threads and add up their totals.
+    int totalCount = 0;
+    for(int i = 0; i < THREAD_COUNT_CODE_SEARCH; i++) {
+        pthread_join(threadIds[i], NULL);
+        totalCount += threadVals[i].count;
+    }
+
+    // Create one big array to put all of the sequence pointers in and copy them all in
+    int seedListSize = 0;
+    seqPtrArray seeds = (seqPtrArray)malloc(sizeof(sequence *) * totalCount);
+    for(int i = 0; i < THREAD_COUNT_CODE_SEARCH; i++) {
+        memcpy(seeds + seedListSize, threadVals[i].seeds, sizeof(sequence *) * threadVals[i].count);
+        seedListSize += threadVals[i].count;
+        free(threadVals[i].seeds);
+    }
+
+    // Print message of how many were found
+    printf(" ---------- The num of seeds found total for %d digits was: \e[31m%d\e[0m\n", NUM_DIGITS, totalCount);
+    printf(" ---------- Using the upper bound, we can say that the number of codes is close to but less than \e[33m%d\e[0m.\n", (int)(((double)seedListSize - (double)3/4) * (queueSize) * len));
+
+    #ifdef RUNTIME
+    // Get end benchmarking time
+    clock_t end_time = clock();
+    printf("\n-- Got here in %f seconds.\n", ((double) (end_time - start_time)) / CLOCKS_PER_SEC );
+    #endif
+
+
+    // ----- STAGE 3: EXTRAPOLATING
+
+    #ifdef RUNTIME
+    // Get end benchmarking time
+    clock_t segment_start_time = clock();
+    #endif
+
+    // Update message
+    printf("\n ------- Beginning the seed extrapolating...\n");
+
+    // Variables
+    unsigned long long totalNumGreyCodes = 0;                        // Total count for all the threads
+    int seedsPerThread = seedListSize / THREAD_COUNT_EXTRAPOLATION;  // The amount of seeds per thread
+
+    // Array of the thread ids
+    pthread_t extrapolateThreadIds[THREAD_COUNT_EXTRAPOLATION];
+
+    // Array of all the values
+    ExtrapolateThreadStruct extrapolateThreadVals[THREAD_COUNT_EXTRAPOLATION];
+
+    // Initialize all the values.
+    for(int i = 0; i < THREAD_COUNT_EXTRAPOLATION; i++) {
+        // Each one gets a different start in the seeds array
+        extrapolateThreadVals[i].seeds = seeds + (seedsPerThread * i);
+
+        // The first ones get their fraction, the last does the rest.
+        if(i != THREAD_COUNT_EXTRAPOLATION - 1) 
+            extrapolateThreadVals[i].numSeedsToExtrapolate = seedsPerThread;
+        else 
+            extrapolateThreadVals[i].numSeedsToExtrapolate = seedListSize - (seedsPerThread * 3);
+        
+        // Pass in the list references it needs
+        extrapolateThreadVals[i].queueStepPointer = queue;
+        extrapolateThreadVals[i].multiplesTablePointer = multiplesTable;
+    }
+
+    // Start each of the threads
+    for(int i = 0; i < THREAD_COUNT_EXTRAPOLATION; i++) {
+        pthread_create(extrapolateThreadIds + i, NULL, &extrapolateSeeds, (void *)(extrapolateThreadVals + i));
+    }
+
+    // Wait for all the threads, add up their totals
+    for(int i = 0; i < THREAD_COUNT_EXTRAPOLATION; i++) {
+        pthread_join(extrapolateThreadIds[i], NULL);
+        totalNumGreyCodes += extrapolateThreadVals[i].numGreyCodes;
+    }
+
+    printf("\n ---------- The number of grey codes with %d digits is \e[31m%lld\e[0m.", NUM_DIGITS, totalNumGreyCodes);
+
+
+    #ifdef RUNTIME
+    // Get end benchmarking time
+    end_time = clock();
+    printf("\n-- This segment took %f seconds.\n", ((double) (end_time - segment_start_time)) / CLOCKS_PER_SEC );
+    printf("-- This run took %f seconds.\n", ((double) (end_time - start_time)) / CLOCKS_PER_SEC );
+    #endif
+
+    // ----- FINAL STAGE: CLOSING
+    // Free all of the seeds and the list itself
+    for(int i = 0; i < seedListSize; i++) {
+        free(seeds[i]);
+    }
+    free(seeds);
+    
+
+    // Free the quick rotation lookup table
+    for(int i = 0; i < NUM_DIGITS; i++) {
+        mpz_clear(multiplesTable[i]);
+    }
+
+    // Exit, success!!
+    pthread_exit(NULL);
+    return EXIT_SUCCESS;
+}
+
