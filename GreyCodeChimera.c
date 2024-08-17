@@ -260,50 +260,6 @@ int addQueueSwapsMasks(int n, int queueIndexToAddFrom, stepMask (*queue)[2], uns
 
 
 /**
- * (Seed Searching) This function searches through the list of sequences using binary search and marks the one 
- * with sequenceNum matching the given one for removal.
- * @param seqs The list of pointers to sequences.
- * @param size The current size of the list of sequences.
- * @param seqToMark The sequence to mark.
-*/
-bool markForRemoval(sequence *seqs[], int size, sequence seqToMark)
-{
-    int low = 0;
-    step *inToMark;
-    step *inSeqs;
-    // I'm saving declaring another variable and just treating size as our high index.
-    while(low <= size) {
-        int mid = low + ((size - low) >> 1);
-
-        // Get the number at the middle and compare
-        inToMark = seqToMark + 2;
-        inSeqs = (step *)(*(seqs[mid])) + 2;
-        while(*inToMark == *inSeqs) {
-            inToMark++;
-            if(inToMark - seqToMark >= len) {
-                (*(seqs[mid]))[0] = 1; // Setting the first step to 1 is our mark for removal.
-                return true;
-            }
-            inSeqs++;
-        }
-
-        // If our num is greater, ignore left half, set low up
-        if(*inToMark > *inSeqs)
-            low = mid + 1;
-
-        // If our num is smaller, ignore right half, set high (size) down
-        else
-            size = mid - 1;
-    }
-
-    // If we reach here, then element was not present
-    //printf("Nope.\n");
-    return false;
-}
-
-
-
-/**
  * This function returns true if the first argument, beingTested, is lower in terms
  * of sequence number than the second argument, original. If they are equal, false
  * is returned, as it is not strictly lower.
