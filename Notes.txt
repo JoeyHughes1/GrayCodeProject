@@ -1,0 +1,444 @@
+UPDATE FROM RIGHT BEFORE UPLOADING TO GITHUB: this was just the file I used to either write out my thoughts and organize myself or record random things I wanted to have saved.
+It is entirely unorganized, but it's mostly chronological top to bottom.
+
+I know the following things for 5 Digits:
+
+The last printed one for just the 0 initial step codes was: "Code 362545152 found: 0,4,3,4,2,4,3,4,1,2,0,2,4,2,1,2,4,3,4,2,1,2,4,0,4,3,2,3,4,0,1,3"
+
+First time I ran it through on just codes starting with 0, printing to terminal on (count & 0x3FFFF) == 0 and no threading:
+"
+-- This run took 6506.465000 seconds.
+-- In total the num found was 362618304 with 5 binary digits.
+"
+There are 362,618,304 codes starting with 0:
+First: the lowest one
+Last: {0,4,3,4,2,4,3,4,1,4,3,4,2,4,3,4,0,4,3,4,2,4,3,4,1,4,3,4,2,4,3,4}
+
+There are 362,618,304 codes starting with 1:
+First: 1,0,1,2,0,1,0,3,0,1,0,2,0,1,0,4,0,1,0,2,0,1,0,3,0,1,0,2,1,0,1,4
+Last: 1,4,3,4,2,4,3,4,1,4,3,4,2,4,3,0,3,4,2,4,3,4,1,4,3,4,2,4,3,4,1,0
+
+And with threads, I found that, yes indeed: there are 362,618,304 for codes starting with 2, 3, and 4, so all of them together is, for sure, 1,813,091,520
+
+Btw the last 5 digit code is: 4,3,4,2,4,3,4,1,4,3,4,2,4,3,4,0,4,3,4,2,4,3,4,1,4,3,4,2,4,3,4,0
+
+The number of 5 digit codes that start with "010" is 22,907,220. I think if I want to find all the seeds, they'll probably all be within there.
+
+
+With one thread and ~600k count limit on 5 digits, the program runs in about 11.28-11.32 seconds. But also about 11.04-11.06.
+Now with the same conditions and with flags implemented, it is now down to 5.19-5.20.
+I optimized it a little more and got it to ~4.9
+With more optimization it is down now to 4.66-4.68, make that 4.53-4.55, make that 4.26-4.3, make that 4.16-4.18
+Actually, my computer started running other things i think so it started going a bit slower, but even with that, I changed to using -O3 and it went down to 3.94-3.97
+
+I reran with the same constraints as the quote above and got this result this time:
+"
+ ---------- The grand total for all digits is: 362618304
+-- This run took 2397.809000 seconds.
+"
+That's 2.7x faster now... my god.
+
+If I assume that I'm right about every digit always having the same number of codes from it, and using threading, with no printing, I can get that down to this:
+"
+ ---------- The num of codes with a fixed first step is: 362618304
+ ---------- Tentatively, that might imply that in total there are 1813091520 codes for 5 digits.
+-- This run took 627.936000 seconds.
+"
+
+
+So the sequence officially goes:
+1: 1
+2: 2
+3: 12
+4: 2,688
+5: 1,813,091,520
+
+
+
+
+The sequence for seeds goes:
+1: 1
+2: 1
+3: 1
+4: 11
+5: 473,037
+
+
+Files:
+The XDigits_Y.bin files are outputted from main, and contain certain grey codes. Each is the straight set of binary characters where each character represents a step in a grey code sequence (For these files,
+    it is the digit number, so the characters are 0 for changing digit 0, 1 for digit 1, etc. This is different from in main where steps are the straight XOR masks and the so the numbers read as powers of 2.)
+    For 3 and 4 digits, they are each for an implied first step of digit 0, then the second step is the Y in their filename. 4Digits_1 is a list of grey codes with first steps (0,1,...).
+    HOWEVER, for 5Digits_2.bin, that is different. I made that one with the implied first steps of (0,1,0,2,...). The 2 in the filename refers to that fourth step of 2. I suspect (not fully proven) that
+    all of the seeds of 5 digits (and any amount of digits) can be found within the codes with those starting steps. There are 7635740 codes in this file.
+    Any of these files can be put in as a command line argument to SeedSearch (given it is compiled with the correct number of digits), and it will find the seeds in the set of grey codes it was provided. I think.
+SeedSearch.c definitely works for finding the seeds in 3 and 4 digits, it's results agree with the old analysis.c (in Old) for those. I am about to try it for 5 digits, and am hopeful, but there are situations it can't handle.
+    The system for generating the queue of swaps works for generating linear sets of swaps, but in a situation where there are multiple sets of duplicate numbers in the signature, it gets dicey.
+    For example, the seeds with (6,6,2,2) signatures have two sets of swaps that need to be done. This situation is accounted for, and will be handled fine by the program. The limit is when there is something
+    like (10,4,4,4,10). (I'm writing this before I've actually ran on 5 digits so keep that in mind) This should ideally still work since the program will come across the set of 3 first, add those, then the
+    set of two will add it's swap, then copy the set of swaps for 3 after it, which will work to get through all the possibilities. However, if a situation arose where there was a set of 2 that was encountered first, then
+    a set of 3 or higher, the program would fail to generate a series of swaps that got through all the possibilities. It would also fail if there was multiple sets of more than 2. I might be able to add that functionality in
+    later, but for now I am hoping it won't be a problem for 5 digits. I'll see in a few minutes when I run it for the first time, though.
+    UPDATE: Yeah it didn't work, it was too slow and also I think wrong. I immediately got the idea for SeedSearch2 after realizing that though, and that worked out nicely.
+
+
+
+Math notes:
+
+- I'm pretty certain that every seed can be found within fixing the first digit, since otherwise there'd have to be a seed that couldn't be swapped or rotated to having it's first step be a certain digit,
+    and that's not possible since every sequence is going to have to change each digit at least twice, or else it'd be missing numbers, and if a digit is changed, then it can always be rotated to be the first step.
+- Based on that, every seed will definitely show up within just the first digit (0,...), but I also suspect that they will always show up within (0,1,...), so fixing the first two digits. That's because for every seed,
+    it can be rotated to have 0 as it's first step, and whatever the next step is, it will be a different digit, and we can just swap that to be 1, so every seed should show up within (0,1,...).
+- In 3 digits every seed had (0,1,0,...), so it's possible that could limit the search even more, but for that I would have to say that a seed would have to change digit a, then b, than a again somewhere in it's sequence, but
+    I don't see why there couldn't be a seed that just didn't have that in there. In that case, it wouldn't show up there, and would first show up in (0,1,2,...)
+- I actually do see now that they couldn't not have 010 in them somewhere. Why? Well let's try to construct a sequence that doesn't have a number that repeat that way. For 3 digits you could start (0,1,2,0,1,X),
+    but then you get stuck. You can't put a 0 there or else it would have 010, you cant put a 1 twice in a row, and you can't put a 2 cause then you have 012012, which is a repetition. That is all of our digit
+    options, so we are stuck. We could try doing (0,2,1,0,2,X), but it's the same problem. With 4 digits, it's the same, you get to (0,1,2,0,1,3,0,1,2,0,1,X) And you get stuck. This can be seen with the fact that
+    all of the 4 digit seeds start with (0,1,0,2,...). This is not a rigorous proof, but it's convincing enough to me that I will say that probably you don't get any like that with 5 digits. I'll double check, 
+    but I'm decently convinced of that.
+
+- I'm sure there's some argument that every starting digit should have the same amount of codes since every seed can be found within just one.
+
+- There's a pretty easy formula to do a rotation, but it would be very nice to have one for doing a swap, so just given the sequence number I could swap two numbers easily.
+
+- First, the program to check for seeds will, when checking if a given sequence is a child of a seed, see if their signatures match. If they don't, then no amount of swapping or rotating will let them overlap, it's definitely not
+    a child of that seed, 100%. However, if they do have matching signatures, then things get hard. They can have matching signatures but still not be a part of the same seed. The slow brute force strategy would be to check
+    for every permutation of swaps and every rotation of those, see if they ever match, and if they don't, then it's not that seed.
+- One slight thing to make that faster is that I can rule out a swap permutation if the signatures dont match. If the seed has a signature of (2,2,4,8), and the permutation of the possible child has (4,8,2,2), then 
+    it's not going to match that way, no rotations will change that, so that can be skipped. That leads me to think that step one could be matching the possible child's signature to that of the seed, then working from there.
+- It needs to be a process of swaps and rotations that will completely exhaust whether or not the possible child is a child or not and has a definite end, at which point i can say confidently that it's not a child.
+    And it should be a short, linear process.
+- My first idea is first swapping the possible child's sequence until the signatures match. Then, if the signature has duplicate elements (like the 2s in 2,2,4,8 or the 4s in 4,4,4,4), then we need to check the 
+    swap permutations of just those. There can be multiple sets of duplicates (like in 2,2,6,6), so we would have to permutate over all of the combinations. And for each of those do all the rotations
+
+- Observation about signatures: the numbers in a signature are always even, since every digit that's turned to a 1 has to be turned back to a 0 by the end of the sequence.
+- There are never any 0s, since every digit has to be turned on and off at least one time.
+- The maximum number is half of the sequence length, since to have any more than that thedigit flipping would have to appear twice in a row somewhere, and that would invalidate the grey code sequence. So for 4 digits the highest 
+    is 8 and for 5 it would be 16.
+
+- There is probably a way to make the algorithm for swapping to match the signature slightly smarter. Right now it swaps 6244 to 6442 by doing two swaps: 6244 - 6424 - 6442, but it might be possible to make it smarter
+    and see that it can be done in just one swap between the second and last element. That would reduce some swapping.
+
+- HUGE OBSERVATION: The number of maximum permutations that a seed can have is n! * (2^n), since there are n! swaps and each swap has 2^n possible rotations.
+    1. An upper bound on the number of grey codes given the number of seeds. If the number of seeds for grey codes with n digits is S(n), then the upper bound on the number of grey codes is
+            G(n) <= S(n) * n! * (2^n)
+        But we can improve this one way further if we accept the fact that the number of ones the "lowest" sequence is gonna have is n! * (2^n) / 4, which holds for 2 3 and 4 digits. 
+        I'm pretty sure that's always gonna be the case. If we use that, then we can improve marginally to
+            G(n) <= (S(n) - 3/4) * n! * (2^n)
+        Ignoring 1 digit, this is exactly correct for 2 and 3 digits, and for 4 digits it suggests G(4) <= 3,936 (actually 2,688), and for 5 digits it suggests G(5) <= 1,816,443,840 (actually 1,813,091,520)
+        Obviously, this is hinging on the fact of knowing how many unique seeds there are, but that's shockingly close to me.
+        So, if we find out how many seeds there are, then we know around about how many codes there are, decently close at least. Also, that tells me that the sequence of seed numbers
+        is going to grow slower than the sequence of how many grey codes there are by a factor of a factorial and an exponential. Wow.
+    2. Based on this upper bound, I could maybe create a crazy efficient method to count grey codes. Given the seeds, I could go through each one and just try to spot symmetries. Each one would start with
+        having n! * 2^n children, and each symmetry would halve that number. For example, the lowest sequence has two, so it's number is divided by 4. That way, given the seeds, I could just go through
+        each one and do some simple checks for symmetries and once that's done for all of them I would have the full number of grey codes right then and there.
+        My idea for a really fast way to count grey codes to maybe even make 5 digits easy is to generate using main like I have been all the grey codes that start with 0102, then use SeedSearch2 to
+        find all the seeds in that, then use another program to extrapolate how many sequences each seed has, and use that to calculate the full number.
+
+- It seems like the "lowest" sequence is the only one that has it's "lowest" signature. I'm not absolutely positive about that, but it's true in 4 digits and from what I've skimmed in 5 digits it seems true there too. Interesting.
+- There might be a way to show that the S(n) is an increasing function by being able to construct seeds for n digits using the seeds for n-1 digits, so S(n) is at least S(n-1). That wouldn't be super useful, but it would let me
+    say that for sure the grey code grows at least somewhat according to n!*(2^n) based on the upper bound.
+- It would be really nice to get a lower bound too, but that would involve knowing what the *minimum* amount of children a seed can have is. It's tempting to say it's the amount of "lowest" but I don't know that for sure.
+    Answering this question might get me more insights into the symmetries of the seeds though, which could help with the chimera program. Also, if the lower bound is based on the same kind of thing as the upper, then
+    I might be able to state the growth rate of G(n) as O( O(S(n)) * n! * 2^n). So then the last thing really to do would be to find the growth rate of the seeds.
+
+- Looking at the 11 4-digit seeds, I spotted three kinds of symmetries. One is the first half and the second half are the same, an easy one. That's the only kind of rotational symmetry you're gonna get, I think, and that
+    halves the number of codes in that group, simple. Second is where there is a kind of swap where before and after the swap, the sequences look the "same", as in you could rotate the sequence after the swap and you would
+    get back to the original. This means that both before and after the swap the same rotations and sequences were available, so swapping those two digits is a useless swap and gains no new sequences, and that *seems*
+    to half the number of sequences as well. The third is a weird one, and it is in the seed (0,1,0,2,1,0,1,3,0,1,0,2,1,0,1,3). It clearly has the rotational symmetry, but it also has another symmetry, as it has 1/4 the 
+    sequences it could have. The other, I think, is that doing a swap of 1 and 2 is the same result as doing a swap of 3 and 4. Weird. It makes sense that that would reduce the number of sequences, I guess, since there
+    are two seemingly different permutations that result in the same rotations being available, but it's hard to spot and very strange.
+
+
+
+
+
+This is now notes for the runtime of SeedSearch2 after just getting it running on 5 digits and stopping once the sequences left is less than 7620000:
+(These include the time to load in all the sequences by the way)
+- None: 40.244
+- O1:   25.278
+- O2:   26.228
+- O3:   27.239
+
+If I don't include the loading and just the culling, it was around 25 (with O1)
+I switched the binary search from using the sequence numbers to just going element by element and the first different one is where the comparison happens, and
+    because of that I didn't need to use the GMP library anymore, and not linking that in the compilation sped it up to around 23.3 seconds for some reason. Also, after all the small tweaks I've tried to do, O2 now
+    seems to be slightly faster at around 23.00-23.27 seconds
+I realized that the thing taking up the most time was the removing of the ones marked for removal. I made it so that it could run even when some were marked for removal, and it got to the same amount of seeds (662) in 0.024 seconds.
+    So now I need to figure out a good rule for when I want to go through and remove the bad ones.
+Oh my god, I went with when seqListSize / numberMarkedForRemoval <= 3, using integer division, and it literally finished counting all the seeds in 27.177 seconds. I actually know how many seeds start with 0102 with 5 digits now.
+    473,033.
+Using a ratio of <= 4 led to a time of 23.484, 5 was 21.978, 6 was 20.594, 7 was 19.966, 8 was 19.113, 9 was 18.386, 10 was 18.363, 11 was 17.921 (I added a little boolean flag to make sure I wasn't overcounting)
+    12 was 17.774, 20 was 16.577, 35 seems to be around the ideal amount, being 16.26-16.35 seconds. With O3 it is now 16.076.
+
+
+
+
+
+
+GAMEPLAN FOR NEW ULTRAFAST ULTIMATE GREY CODE COUNTER:
+- First, we have three threads run using the algorithm from main.c, calculating for grey codes starting with 01020, 01021, and 01023 (if n>3).
+- Make one big array that holds all the pointers from all three using a big memcpy.
+- Use the SeedSearch2 algorithm to find all of the seeds from that set of codes
+- (I haven't coded this part yet) Use either the symmetry counter or brute force hash map counting to find how many codes there are per seed
+- Add up the number of codes per seed and voila, the total number of grey codes.
+
+
+
+
+HOW TO MAKE THAT HAPPEN:
+- I need to make main work with unapologetically just 0102X, and have only the three threads. DONE 
+- Make sure it correctly adds up and counts the correct amount of sequences DONE
+- Add functionality to have the threads allocate memory to each new sequence (log'd) and return an array of the pointers DONE
+- Add code between the main code and the search code to consolidate the three threads' arrays into one big array. DONE
+- Import the SeedSearch2 algorithm to use the big array and find all the seeds. DONE
+- Get it working and see how long it takes to find all the seeds for 5 digits (hopefully short).
+    DONE, it takes, on my first run, 30.535 seconds to find all the seeds for 5 digits. Shorter than I expected!
+- Start creating a program to look through all the seeds and find exactly how many codes can be made from each.
+
+SYMMETRY SPOTTER NOTES:
+- I came up with an algorithm where I would check if the sequence was half by half rotationally symmetric and if so I would halve the sequences, then go
+    through all of the swaps and see how many were unique. That basically comes from me looking at 4 digits and noticing that sometimes when you swap two digits
+    and then rotate a bit you get back to the same sequence, so the swap basically didn't change which sequences were available through rotation, they would rotate into
+    all the same sequences, so the swap basically did nothing. Also, I saw in one of the 4 digit seeds that when you do a swap with 0 and 1, it did the same as a swap
+    with 2 and 3, so I figured if you went through all the permutations and for each check if any of the rotations matched in terms of sequence number with any of
+    the previous unique permutations, then you would end up in the list with just the permutations that were unique and all had unique rotations, and you could count
+    how many sequences from there using the numbr of unique permutations * the number of rotations per permutation. I did that and it works perfectly for 4 digits, but when going 
+    up to 5 digits it ended up actually undercounting a little bit. The actual number of codes is 1,813,091,520, but the number I ended up with is 1,813,085,280, which is 6240 off, below.
+    I had assumed that mayb I would end up overcounting somehow but I didn't think I'd be undercounting. One theory right now is that it actually is possible for some seeds to only
+    show up starting in 0,1,2, but that would suck and completely overcomplicate the structure of the program right now, and I would be shocked to see that actually happen.
+    Maybe it's not actually impossible though. My other theory which I would really like for it to be is that I'm oversimplifying the kind of rotational complexities that could be there.
+    Right now it is just checking if the first half is equal to the second half for each seed and if it is then I'm halving the number of rotations per permutation, but it could maybe 
+    be more complex than that.
+- I think the move right now is to make another version of what it is right now that actually goes through and just calculates all the rotations and permutations for each one and stores
+    them all and gets rid of duplicates using a hash table because I know for sure that that will get all of the permutations and rotations and if that is still not correct then I'll know
+    that I've missed some seeds and my strategy right now still works. If it is correct that time, then I know that I just need to edit the strategy from before to catch the extra ones 
+    that it was missing. And if that strategy actually just ends up being faster anyway and is correct then I can just stick with that. If I can get a really fast method of extrapolating how
+    many exact codes there are for each seed, then I might drastically improve the runtime of the program. If I can get the symmetry spotter to work and get the correct answer AND not
+    have to go through every permutation and rotation then I could get the program runtime to crazy low levels. Right now, with the incorrect answer, 
+    the program finished for 5 digits in 412 seconds, an improvement from the 600 seconds that it was at best before, but still wrong, so I have to fix that before I celebrate.
+- Next step right now is to make the other version of the last part where I go through and use some kind of hash map to go for certain and make sure I'm not missing any seeds, and also
+    see if it's just faster anyway.
+
+
+
+CHIMERA RUNTIME PROGRESSION:
+With 5 digits, I remember the first time running it, it was around 400 something seconds (with the incorrect answer of 1,813,085,280 instead of 1,813,091,520 [I'm missing seeds, I'll fix that in a bit]),
+    and when I switched to using a hash table, it went down I remember around 20 seconds, not that much, to high 300s, maybe 380 seconds. I just implemented an array of occupied values instead of being in
+    the node struct, I brought back the rotational symmetry boolean instead of counting rotations, and I added a check for if the number of permutations is above half the possible and if so breaking and
+    assuming the number will be the max possible (THIS IS ASSUMING that each symmetry with the swaps will exactly halve the number of unique permutations, which I don't know and have just noticed to be
+    true, so this is a shaky assumption), and this resulted in the same wrong answer of 1,813,085,280, but in 211 seconds. Amazing improvement!
+    - Just switched the hash and double hash functions to simple modulus, getting rid of the complicated hash functions from before, and that resulted in only 80 seconds!!!! The old ones were taking 
+        forever because the export function from GMP was allocating a buffer to hold the exported information, and then that was being freed, so every hash and double hash something was being allocated and freed.
+
+I WAS WRONG, THE NUMBER OF SEEDS FOR 5 DIGITS IS ACTUALLY 473,037, I WAS MISSING 4 THAT START WITH JUST 012, IT ACTUALLY IS POSSIBLE. WITH THOSE EXTRA SEEDS, THE SEED EXTRAPOLATION ACTUALLY WORKS.
+    - Wow, I actually didn't think a seed could avoid having 010, but it was, there were 4, and with that the seed extrapolation actually gets the correct answer. The program now gets the answer in a total of
+        116-117 seconds (starting extrapolation at 66). There are now 5 threads at the start, 01020, 01021, 01023, 0120, and 0123. That's as deep as we can comfortably get without making a billion more threads.
+    - I tried, and successfully did, make another version of the symmetry spotter that instead of doing all the permutations and rotations, just checked all swaps for ones that did the same as doing no swap, and
+        checked for any swap that did the same thing as a different swap, and it was much faster, more than 20 seconds faster, I think, but it was getting the wrong answer. Specifically for the sequences below,
+        it was missing a symmetry that was halving the amount of sequences.
+            01023130414321240102313041432124: 960 (is actually 480)
+            01023134212041430102313421204143: 960 (is actually 480)
+            01023432101243420102343210124342: 960 (is actually 480)
+            01201321342340240120132134234024: 960 (is actually 480)
+        After looking at it for a while, I've come up with a reason why (unproven). I think that what the new one is essentially doing is searching for sequences of one or two swaps that don't change the
+        sequence. So a useless swap was really just one swap that didn't change the sequence (it still had all the same rotations). The identical swaps were really sequences of two swaps that didn't change
+        the sequence. I think those four above have sequences of three unique swaps that end up bringing the sequence back to where it started. I don't know what they are, but that's what it looks like to me.
+        I could try and code something up to check and see exactly what those swaps are, but honestly I'm pretty sure that's what's going on, and if that is the case then I will have to do way more checks
+        per seed, to the point where it'd be actually slower than the old system. Also, I don't know what the limit is! Maybe there's actually a sequence of 4 or 5 swaps that don't change anything for one
+        of those! I don't know. I used desmos to see if that would actually for sure be slower, and yeah, it would. Doing that and searching for sequences of swaps of length up to n-2 or anything relating
+        to the number of digits would grow faster than n!. So, sadly, I think I will be sticking with the old system.
+    - After going back to the old system it was still finishing in around 117 seconds, but I changed the swap function to just use the limit variable that was already there instead of making another pointer
+        to loop through the array, and that saved around 4 seconds, then I added something to the code finding part where if it was one of the threads that started with 012, then it would treat codes that had
+        a repeat after two (like 010 or 424) like they were invalid codes, and changed the seed search slightly to work with that, so it would only treat 012 children as relevant if the parent seed was also
+        a 012 seed, and with those, the threads of 012 went from being the slowest to finishing instantly, finding only a total of 64 codes that never had a repeat after two, and the total number of codes
+        being searched through by seed search went down a ton, to only 5815654 instead of around 15 million before I believe. Those added up to bring the total runtime down to about 83.7 seconds. Huge!!!
+        And it's still correct!! The reason this works is because the only codes I'm looking for in the 012 threads are those that never have a repeat after two, because if they did, it could be swapped
+        and rotated into starting with 010, and the other threads would already catch that. Those threads already have all the seeds that have a repeat after two, I'm only looking for ones that explicitly
+        don't.
+        So now, the runtime is around 83.7 seconds total, 17.8 for the code searching, 16 for the seed search, and 49.8 for the extrapolation.
+    - I have an idea now to do that with all of the threads, and have them check in that same spot in the main algorithm for if the current code is going to have been a child of a seed from a lower thread,
+        and if so to skip it. That way the sequences returned will only have children of seeds starting with their starting steps (I think).
+        UDPATE: I have done that, and it really lessened the amount of sequences searched, down to 2719822, crazy few, but the 01020 thread still searches everything, and the other threads wait for it, and
+        with the extra function stuff it takes longer, so the total runtime is actually slightly slower. I ran it and (without changing seedsearch so there's a bunch of binary searches going nowhere) right
+        now it ran in 84.5 seconds total, 21.13 seconds for the code finding (mostly the big thread), 12.7 for the seed searching, and around 50.7 for the extrapolating.
+        My plan now is to actually move the seedSearch part into the threads. Each thread should ideally be completely separate right now, only containing seeds that start with their start steps. I think.
+        Because the functions make it so it can't have a sequence from a lower seed, and if there are seeds from higher threads, there actually isn't, because they have a child that starts with the lower
+        start, so it actually is where it should be. So ideally they would only have seeds from their own search range, so seed search can just treat relevant children as children with the same start as
+        the thread, and it will output a seed list that is mutually exclusive with all the other threads, so when all the threads finish, the seed arrays can be put together and pumped into the extrapolation.
+    - I successfully moved the seed searching into the threads, and with all that running and working, it got the correct answer in 80.43 seconds. Three seconds saved!! This means that the way I have it actually
+        does make every thread generate only the seeds starting with their set start. Awesome!!! And it ended up saving time. I did notice that adding the function calls and stuff to the longer thread made it
+        very much slower, so I might separate out another function for the same algorithm, but one with the function and one without. That might save some seconds on that longest thread.
+        UPDATE: I ended up just doing a boolean flag for if the function pointer was null or not and put it before the checks, and it saved a little over 3 seconds on the longest thread, so the total runtime 
+        is down to 77.7 seconds. lucky sevens!! Still getting the right answer too.
+        The extrapolating part is still definitely the longest, taking 50.9 seconds on that last run. 
+    - My next idea is to mix the seed search into the main algorithm. I will need a new hash table. And I could use the fact of the unique permutations that when I'm adding the rotations in, if a rotation is 
+        ever already in there, then I know that all of the rotations will be in there, so I can just skip to the next swap. I wanted to get that down first, but the main idea is I have a resizable hash table
+        that is used in main, and for every new sequence instead of just adding it to a list of sequences to be processed later, I add it to a separate seed list, then go through all of its permutations and 
+        rotations and add them all into the hash table as well. I think I would start it with (1024 << NUM_DIGITS) slots, then maybe multiply by 8 each time. The main trouble that will come with doing this
+        is the resizing of the hash table and having to implement a whole new hash table. Won't be impossible, just annoying since I already have one and will have to make different names for each of them.
+        BEFORE doing any of this, the first segment with the code search and seed search with the 5 threads is taking usually around mid 26 seconds.
+        Follow-up idea, I could also probably combine the seed extrapolation algorithm into there as well. While the zeroPtr is going through the current swap of the seed to find all the relevant children,
+        I can use it as the first digit pointer when doing numerical rotations, and be searching using the GMPHashTable to find if the swap is a unique one or not, and if it's not we can immediately skip,
+        which would help both the seed search and extrapolation part of it. Basically, while the seed search is already going through all the permutations and all the rotations looking for relevant children 
+        to add to a hash table for main to use to find new seeds, the extrapolation could be using that same process to find exactly how many unique permutations that seed has, and keep a tally of how many
+        grey codes there are from the seeds. I wouldn't even need to save the seeds in that scenario, I would literally just need each thread to output its grey code number (and how many seeds too) 
+        from the extrapolation part and add them together to get the total. That might be the final evolution of this program, all three parts in one big loop.
+        Ill end up making it without putting the extrapolation into there first, and save that, then put it in there, cause it might overall be better to keep the extrapolation separate, because then you can
+        use threading on the seed list and evenly split up the extrapolation job. So you'd take the 26 second penalty of creating the list of seeds, but then use as many threads as you want on extrapolating 
+        them all. I'm really not sure if keeping it like that is overall better, or if mixing it will end up being faster. I'm gonna try at most, after mixing seed search in with main, to split the 
+        extrapolation into 4 threads doing the same amount of work, then see how fast that is, then mix the extrapolation into the searching algorithm, and see if that ends up being faster than the 4 threads.
+        Even if it isn't, it's possible to go even deeper into the possibilities of the grey codes, like having a thread for 010201 and 010203 and all that jazz. If the goal is to make it as fast as possible
+        for a theoretical supercomputer who can run as many threads as you can dream of, then keeping it separate might be best, I'm not sure. We'll see which ends up being faster for just my computer, though. 
+        ...
+        UPDATE: I have successfully made the new hash table and implemented it all and combined main and the seed searching into one. Turns out, it's about the same for 5 digits. I'm getting about mid 
+            26 seconds. Pretty consistently around 26.3-26.4. It seems to definitely be slower for the smaller ones, but I suspect that it will turn out faster in the long run if I tried it for 6 digits. Also,
+            it's cool, so I kinda want to keep it. It's less code overall too. Also, there might be room to improve it further, make the hash table faster or something.
+            Alright, it's a little later, I've tried to improve it as much as I can, I'm getting low 26s-26.4 sometimes, so I think that's overall slightly better? I think as the number of sequences gets higher
+            it will be faster and faster. I think. Either way, that's okay. I'm gonna guess that if that doesn't really save any time then putting the extrapolator in there won't save any either. A shame. 
+            I think the best way forward now is to use threading to make the extrapolation as fast as possible.
+    - I split the final extrapolation into threads, now the whole thing finished in 45.7 seconds with the correct answer. Pretty cool, but I'm going to do another thing where I have each thread that finishes 
+        before the last one create a thread to extrapolate it's seeds, so that while the long one is finishing finding all its seeds, the other ones are already knocking out a chunk of the extrapolation.
+        Also, that means we don't have to put together all the seed lists, which is nice.
+        UPDATE: I did that, and ended up with 42.8 seconds, a pretty decent improvement. (I will note that the runtime is very inconsistent, I have gotten 42.8 a couple times, but it also tends to be a lot higher,
+            like in the 46s for some reason, one time it was 50 seconds, no idea. Just now out of nowhere I got 41.39, I didn't change anything it just did that. IDK man lol OK now one just finished in 40.6 lol)
+    - After the improvement above and restarting my computer, the program ran in about 39 seconds. Then, I did an improvement where instead of going through every swap and every rotation to find the relevant
+        children in the seeds, I made some functions that checked if it could be possibly swapped into being a child, and it did just one rotation through the sequence, and every time it could be swapped into 
+        starting with the set start, it would swap it to that, and bam, relevant child. Then, it went through the swaps of all the digits that weren't set in the start, added all those, and moved on in
+        the rotation. This brought the total time down to 31 seconds! Much faster!
+    - I just figure out something huge. Instead of all that with the hash tables and such, I just made it look through all the "relevant children" and find if there were any that were lower than the original,
+        and if there were then it wasn't a seed, and if there weren't then it was a seed. And it finished in 5 digits in 31 seconds, without the need for a hash table. Speed AND memory efficiency. With this,
+        the seed searching doesn't even involve any looking at any of the previous seeds at all! It only needs the sequence at hand and it has everything it needs, if all I wanted was the number of seeds, then 
+        I wouldn't even need to store the actual seeds at all, I would just count them!! But I just did that and found out that it works, there's tons more optimizations knowing this now, so I'm gonna go do 
+        all of that.
+        UPDATE: I have changed everything in the code searching part to use stepMasks since it wasn't necessary to convert right away, so it now only converts the seeds when storing them in the array
+        Also, I changed stepMasks to only be a short instead of an int and that seemed to make it faster. It now is getting through the first section in 5 digits in only 18.2 seconds.
+    
+    
+
+
+
+- POSSIBLY: See if there is a way to speed up the SeedSearch2 algorithm using instead of binary search a hashmap. If I can linearly find each sequence to mark for removal instead of
+    using binary search that might speed it up considerably. I don't think this works because of the need to find the next lowest sequence. Hash maps aren't exactly sorted, so finding the next sequence 
+    that isn't marked in it would be hard, but I could imagine that there is a clever way to make it work.
+- POSSIBLY: Maybe there is a way to speed up the initial grey code search after finding a valid grey code, so instead of incrementing at the very end incrementing from later on,
+    since past a certain point there is only one way to finish a grey code successfully. For example, the last step has to be turning off the last digit that is a 1 to get back to 0, so there will only ever
+    be one correct step for the very last step. The second to last also has to be turning off, since if it were turning on and the step before wasn't 0, then for the last step there would be two 1s left and it wouldn't
+    end in 0. So the last two steps have to be turning off digits, but the third to last could be turning off or turning on. So, we know once we have a valid one that no other combination of the last two
+    steps is going to work, so we can increment the third to last step instead. That might add up to a pretty decent timesave. And it sounds like pretty sound logic to me.
+    - UPDATE: I'm going to try to implement this. I'm in the starting stages of creating the chimera, and (without the allocation or anything of the codes), it is running with 3 threads and finding 5815590 codes
+        for 5 digits in 16.22-16.45 seconds. I implemented it and now it's down to 15.41-15.59. That's actually a huge improvement! And, I think it might be valid to do this with the last 3 steps too.
+        The last two are fixed for sure, the third to last step could be turning on or off, but I still think it's fixed in either case. I just implemented that and it ended up running in 15.231 and 15.243 seconds.
+        I tried going 5 steps back and it's working too (on the 0102X ones.), but when I go 6 steps back it starts to miss some codes. I can convince myself of 3 steps back, 5 I'm not so sure, and it isn't 
+        having an incredible impact on runtime, so I'll stick to 3. Even with that, after realizing that the 0 flag doesn't need to be reset since it's never set to true, it is running consistently between 15-15.5 seconds.
+        Lowest I saw was a 14.8 second runtime. So, pretty substantial improvement there.
+- POSSIBLY: I've been thinking I could make SeedSearch2 use a hash table, but then I started thinking it might be good to combine main and SeedSearch2 into one algorithm. Each main thread would have a resizable hash table
+    that they would fill with sequence numbers, and each new sequence would be checked to be in the table already and if it wasn't it would be added to a separate seed array and all it's children, relevant to that
+    specific thread, would be added to the hash table. That way still only the seeds are having their permutations ran through. At the end main would output all the seeds, and the lists would be combined together.
+    Problem, though, I'd have to account for other threads having their lowest for a seed not being the actual lowest, so I'd have to basically do seedsearch again through that list. Lame. I could make it all
+    be one thread to fix that, which would be lame, or I could just make the SeedSearch2 part itself use a hash table. that might be best. So with that, it's the same idea, but instead of the sorted list of sequences
+    that slowly whittles down, it's a hashmap with removable entries, and there's also a linear array with all the sequences in order. So there's a pointer that moves through the linear sorted array and finds the next
+    one that isn't removed from the the hashmap, then that's a seed, and it removes all it's relevant children from the hashmap (via a removed boolean or something). Then it keeps searching. There's no need to linearly
+    remove elements from the list, and its constant runtime for finding each one to remove and checking if the next sequence is still in the hashmap. The linear removals from the array in seedsearch2 right now take
+    up a bunch of time, as does the binary search, so this would definitely be better. The issue is that everything would have to be converted to it's sequence number. Main would probably instead of allocating space 
+    for the sequences would init a new sequence num in the array, and return all those and those would get put in order, then it would create a hashmap and insert every one into the hashmap (which would use chaining)
+    and then it would go through and do the removals. It would have to go from sequence num to sequence which I haven't done before but wouldn't be hard. I think that has a real chance of being faster. The current
+    seed search section takes at best about 26 seconds on its own. It's an option to bring that down for sure.
+- POSSIBLY: I should look more into the ending few steps of a sequence. It might be possible to instead of doing the incrementation until I find the sequence strategy, come up with a different method to find the last
+    few steps of a grey code. Definitely the last 3, maybe the last 5 steps of a valid grey code are forced, there will never be two grey codes who only differ in the last 5 steps (maybe. Based on some rudimentary
+    testing I saw a while ago that's somewhere in this notes document. Definitely the last 3 though, those are forced, there's never gonna be a different way to do the last 3 steps). So, instead of doing the 
+    incrementing thing I'm already doing, I make some kind of algorithm that either finds the last 5 steps or says it's not possible. There could maybe perhaps be a way to do that that's faster than doing the 
+    incrementation. Cause think about it, right now it'll increment the 6th step into a way where if the last 5 steps are correct, then there's a valid grey code. What it does right now is copy (0,1,0,2,0) as the
+    last 5 steps, then goes through the testing and incrementing of them until it finds it. Might there be a better way? I'm not sure. It could be possible. Looking at which ones are left and seeing which path 
+    between them is one bit away each step, something like that, also using the knowledge that the last step can't be 0 cause the first step is 0 (if you rotate, you'd have two 0s next to eachother). In 010
+    threads the last step can't be 1 either (last number before the last 0 is a power of two, after 010, the digit 0 power of two is already covered and the digit 1 power of two is already covered too.) Maybe there's
+    some graph theory there finding the one path between all the nodes where the transitions are the bit swaps. idk it feels like maybe it could be faster on average.
+- POSSIBLY: There might be a way to speed up the finding relevant children part of the seed searching. I can imagine that if it's in the 01020 thread, then only permutations that have three 0s would be worth looking at,
+    and maybe it could count the amount of 0s its already passed and stop early or something like that if theres less than 3 left. Not sure if that would be much faster or slower, but it could maybe work. Worth thinking
+    about.
+    - I should check if changing main over from using stepMasks at all and just using the digit numbers all the way through ends up faster, even with the constant bitshifting. 
+- POSSIBLY: I wondered if there was a way to use less storage, and I thought about what if I only stored the lowest form of the seeds in a hash table, then each sequence I tried to find which seed it belongs to
+    based on how I know what the seed starts with. I could imagine there being a decently efficient way to do that, especially for the 01020 thread. Instead of just blindly searching through all the swaps and
+    rotations, we get a little smarter and look for subsequences that match the same pattern of ABACA, then for each of those we swap it to match 01020, then check for it in the hash table, then go through the 
+    permutations of the extra digits I could see that being decently quick since we aren't looking through that many things for each sequence, and it would only use as much storage as was needed to store the seeds.
+    Worth looking into, definitely. Might be slower, but I think that would be worth it on the search for 6 digits.
+- POSSIBLY: There's got to be a way to get the GPU involved. It's such a powerful machine, and it's so fast, there's got to be a way. The issue is that it doesn't do well with conditionals, it just has to be straight 
+    calculation, and I don't know how much straight calculation there is in this program. But it's so fast... I dunno, I'm thinking there could be a way to use the cpu to build up a buffer of calculations to do
+    and then send them to the gpu every so often so it can just power through them, then the cpu can sift through the results. Maybe there's a way to have the steps as a matrix and have some sort of matrix calculations
+    that reveal something about the code, like if it is valid or not or something or if it is in its lowest form. If I could do some kind of matrix magic to take a step vector and find if its in its lowest form, then
+    that would be super useful, cause then I could just build up a buffer of maybe seeds and then send them off to the gpu and it could do all of the calculations at once super quick and then the cpu could pick out all 
+    the ones that are seeds and save them. Something like that, but I would need to think a lot about how I would do that. Maybe I could talk to my linear algebra professor about that, he could maybe shed some insight
+    into that question. Also, I could maybe hide some conditionals using match, like the whole thing of non-branching stuff where you just use like subtraction and multiplication and stuff to simulate conditionals.
+
+
+6 DIGITS PROGRESS:
+- I just tried to run chimera on 6 digits and just let it run, printing how many seeds it had found every so often, and it was an interesting experience. I feel bad for my poor computer, my 32 gigs of ram filled up
+    immediately, and somehow the program just kept running, props to windows for letting it just go and go all that time and somehow managing it. It ran for a while and produced a lot of output, but looking through
+    it for the most recent count of seeds from every thread, I'm left with this:
+        Thr[5,1]Seed:1536000
+        Thr[5,0]Seed:413696
+    To explain, 5,1 means the thread with 5 preset steps and the last one being 1, so that means the thread of (0,1,0,2,1). The 5,0 is (0,1,0,2,0). Somehow nothing from the other threads. It was set to print every
+    time the number of seeds was a multiple of 4096, so either the OS decided those threads needed to die or they didn't work or they just never got up to that many seeds. Either way, strange. I'll rerun it in a bit
+    with just one thread at a time and printing maybe every seed and I'll see what's up. For now, though, I'm gonna let my computer rest a bit lol. However, the reason I did this was to see a lower bound on the
+    number of seeds, so now I know there are at least 1536000 + 413696 = 1,949,696 seeds. There are definitely way more, but thats as many as my computer could get to before windows shut down the program. Pretty 
+    interesting. If we assume they all have the max amount of permutations, which they won't but there are definitely more seeds which will make up the gap, then that means there are probably at least
+    1949696 * 6! * (2^6) sequences of 6 digits, which is = 22,460,497,920. This is not much bigger than 4 digits, which makes me even more sure that there are an absurd number of seeds for 6 digits.
+    Fascinating. 
+- I now have a version of chimera that solves 5 digits in 39 seconds at best, but it uses a ton of storage. I'm going to now try to switch to only storing the seeds in their lowest form, which should save a bunch 
+    of storage, and just for each new sequence just find points of interest where it could be swapped to match the start and do the swap and any extra swaps and for each one check if it matches any known seeds.
+    This should work in detecting children, it might honestly be faster too since instead of doing the full n! swaps and all the rotations for each one, it's just doing basically one rotation and swapping when 
+    necessary. I could actually maybe make the relevant children finding faster by doing that with the seeds as it is right now. I'm gonna try that, then I'll switch to that, since It'll use less storage, and
+    that's the problem with 6 digits right now.
+    UPDATE: I made the version that only stores the seeds, and I ran it on 5 digits, and it ended up finishing in only 36 seconds. That's only 5 seconds slower than how it was with 5 digits and the storage-hungry
+        version. I'm gonna try this with 6 digits and see how it goes. It's currently running, and oh my god it's using so much less memory, and the 5,0 thread is running a lot faster. Also, the 4,3 thread is 
+        finding some seeds, but it doesn't look like the 4,0 thread is finding any at all. Also, I'm not seeing any of the 5,3 thread either. the memory hungry version was running for a few seconds before it hit 
+        32 gigs of my ram, but this has been running for a few minutes and got up to 19 gigs before memory compression kicked in and it hasn't gotten up to 18 gigs since. I'm pretty sure I just hit a big rehash,
+        cause the memory very quickly jumped up to 32 gigs, and compression had to kick it into high gear, now its back down to 29, but we're starting to reach that point for sure.
+- I ran it on 6 digits for about half an hour I think, and the results are this:
+        Thr[4,3]Seed:3952
+        Thr[5,0]Seed:21061632
+        Thr[5,1]Seed:10018816
+    With no updates from the other threads. This was using a pretty big amount of storage, but much much less than before, which is amazing. This means there are at least a total of 3952+21061632+10018816 seeds 
+    for 6 digits, which means S(6) > 31,084,400 seeds. Using the approximation like before, G(6) > 1,432,369,152,000. Very cool! It's probably still a few orders of magnitude more than that, 
+    I just ran it for a longgg time, something like 6 hours, on 6 digits, and it got up to the following:
+        Thr[5,0]Seed: 329777152: 0,1,0,2,0,1,0,3,0,1,0,2,0,1,0,4,0,1,0,2,0,1,0,3,0,1,0,2,0,1,0,5,3,2,3,0,3,4,2,4,3,4,1,3,4,3,2,0,4,3,2,3,4,3,2,0,4,3,1,0,3,2,3,5
+        Thr[5,1]Seed: 115343360: 0,1,0,2,1,0,1,3,0,1,0,2,1,0,1,4,0,1,0,2,1,0,1,3,0,1,0,2,1,5,3,2,4,1,2,4,3,0,4,0,1,3,0,3,2,0,1,0,4,1,0,1,3,0,1,4,1,2,4,1,3,5,1,4
+        Thr[5,3]Seed:    111104: 0,1,0,2,3,0,1,0,2,4,0,1,0,2,3,0,1,0,2,5,2,0,4,3,4,2,1,4,2,4,5,1,0,5,2,4,0,5,1,0,5,4,3,5,0,1,5,4,1,4,2,0,3,4,1,3,5,0,1,5,0,2,1,5
+        Thr[4,3]Seed:     12800: 0,1,2,3,0,1,2,4,3,0,5,1,4,0,5,2,1,4,3,0,2,5,1,4,2,0,3,1,4,0,3,1,5,2,3,0,5,1,3,2,4,0,5,3,4,1,0,3,2,4,0,1,5,3,2,1,4,0,3,2,4,1,3,5
+    With still nothing from [4,0]. This is a freaking lot, but based on just the 5 0 seed I can see there are a lot left to do. It only got to the point of finishing changing the second half of lowest. 
+    Also, [5,3] started showing up! I really didn't expect that! But it did! I don't know exactly what the first seed was (which would've been nice), but the first time it printed was this
+        Thr[5,3]Seed:       512: 0,1,0,2,3,0,1,0,2,4,0,1,0,2,3,0,1,0,2,5,2,0,1,0,2,5,0,1,5,1,3,4,2,0,3,0,5,1,0,5,3,4,5,0,1,5,0,2,1,0,2,4,3,2,1,0,3,5,0,1,5,0,3,5
+    I think [4,3] is the only one I can hope to see finishing, it is actually within reach I think. It was at 012301240, and I stopped it at 012301243, so just a few steps away from changing that
+    magic 3 and me actually knowing the grand total. Each one takes longer and longer, though, but I could see it actually finishing after a few days. But, after that long of running, the new lower bound is...
+    S(6) > 445244416 and G(6) > 20,516,862,689,280. That's 20 trillion. A lot, but still definitely nowhere close to the actual number. And even with the windows memory compression, I was reaching up to my 32 GB
+    limit, and when I stopped it I had seen it just transfer over some memory to disk, so there's definitely a lot of memory of seeds to store.
+
+
+
+
+Thr[4,3]Seed:     12800: 0,1,2,3,0,1,2,4,3,0,5,1,4,0,5,2,1,4,3,0,2,5,1,4,2,0,3,1,4,0,3,1,5,2,3,0,5,1,3,2,4,0,5,3,4,1,0,3,2,4,0,1,5,3,2,1,4,0,3,2,4,1,3,5
+Thr[5,3]Seed:    104960: 0,1,0,2,3,0,1,0,2,4,0,1,0,2,3,0,1,0,2,5,2,0,4,2,4,5,1,0,5,3,2,0,5,1,0,5,0,4,1,2,3,2,5,1,0,5,3,1,3,4,0,2,3,1,0,4,0,5,1,0,5,3,1,5
+Thr[5,3]Seed:    105472: 0,1,0,2,3,0,1,0,2,4,0,1,0,2,3,0,1,0,2,5,2,0,4,2,4,5,1,0,5,3,2,4,3,4,0,2,3,4,2,1,0,2,4,2,5,0,1,5,1,2,4,5,1,0,5,3,0,2,5,1,0,5,2,5
+Thr[5,3]Seed:    105984: 0,1,0,2,3,0,1,0,2,4,0,1,0,2,3,0,1,0,2,5,2,0,4,2,4,5,1,0,5,4,0,3,2,4,5,1,0,5,0,4,2,5,1,0,5,2,4,2,1,0,1,3,2,0,4,0,5,1,0,5,3,2,3,5
+Thr[5,0]Seed: 324009984: 0,1,0,2,0,1,0,3,0,1,0,2,0,1,0,4,0,1,0,2,0,1,0,3,0,1,0,2,0,1,0,5,3,2,1,2,0,2,4,1,4,3,0,1,0,4,0,3,1,3,0,2,1,3,1,4,3,1,0,4,3,1,3,5
+Thr[5,3]Seed:    106496: 0,1,0,2,3,0,1,0,2,4,0,1,0,2,3,0,1,0,2,5,2,0,4,2,4,5,1,0,5,4,2,3,0,2,4,1,2,4,0,3,5,0,1,5,2,4,2,0,3,0,5,1,0,5,2,1,4,5,0,1,5,0,3,5
+Thr[5,3]Seed:    107008: 0,1,0,2,3,0,1,0,2,4,0,1,0,2,3,0,1,0,2,5,2,0,4,2,4,5,1,0,5,4,3,5,0,1,5,1,3,4,3,1,2,4,1,0,3,0,5,1,0,5,3,4,5,0,1,5,3,0,3,2,1,4,3,5
+Thr[5,0]Seed: 324534272: 0,1,0,2,0,1,0,3,0,1,0,2,0,1,0,4,0,1,0,2,0,1,0,3,0,1,0,2,0,1,0,5,3,2,1,2,3,2,0,2,3,4,3,0,3,2,0,4,1,2,4,0,2,0,3,1,0,1,4,0,2,4,0,5
+Thr[5,1]Seed: 113246208: 0,1,0,2,1,0,1,3,0,1,0,2,1,0,1,4,0,1,0,2,1,0,1,3,0,1,0,2,1,5,3,2,1,2,4,1,2,0,4,2,4,3,0,1,4,2,1,0,4,0,1,3,0,2,4,2,3,4,2,4,1,5,1,4
+
+first batch of [5,3]: Thr[5,3]Seed:       512: 0,1,0,2,3,0,1,0,2,4,0,1,0,2,3,0,1,0,2,5,2,0,1,0,2,5,0,1,5,1,3,4,2,0,3,0,5,1,0,5,3,4,5,0,1,5,0,2,1,0,2,4,3,2,1,0,3,5,0,1,5,0,3,5
+
+
+
+Code snippits:
+
+
+        // gmp_printf("%Zd, ", currentRotation);
+
+
+
+        /* Debug output to console.
+        if((count & 0x3FFFF) == 0) {
+            printf("Code %9d found: ", count); // Print progress to console
+            for(int j = 0; j < len; j++) printf(j != len - 1 ? "%d," : "%d\n", test[j]);
+        }
+        */
